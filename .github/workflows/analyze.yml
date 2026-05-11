@@ -1,0 +1,66 @@
+name: 📈 주가 추세 분석
+
+on:
+  workflow_dispatch:          # 수동 실행만
+    inputs:
+      note:
+        description: "실행 메모 (선택)"
+        required: false
+        default: ""
+
+permissions:
+  contents: write             # 분석 결과를 repo에 커밋하기 위해 필요
+
+jobs:
+  analyze-and-deploy:
+    name: 데이터 수집 → 분류 → 페이지 배포
+    runs-on: ubuntu-latest
+
+    steps:
+      # ── 1. 코드 체크아웃 ───────────────────────────────────────────
+      - name: ① Checkout
+        uses: actions/checkout@v4
+
+      # ── 2. Python 환경 ─────────────────────────────────────────────
+      - name: ② Python 3.11 설정
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      # ── 3. 의존 패키지 설치 ────────────────────────────────────────
+      - name: ③ 패키지 설치
+        run: pip install -r requirements.txt
+
+      # ── 4. 주가 데이터 수집 + 추세 분류 ───────────────────────────
+      - name: ④ 주가 데이터 수집 (yfinance)
+        run: python analyze_stocks.py
+
+      # ── 5. HTML 리포트 생성 ────────────────────────────────────────
+      - name: ⑤ HTML 리포트 생성
+        run: python build_report.py
+
+      # ── 6. docs/index.html 갱신 (GitHub Pages 소스) ───────────────
+      - name: ⑥ docs/index.html 갱신
+        run: |
+          mkdir -p docs
+          cp output/us_stock_trend_analysis.html docs/index.html
+
+      # ── 7. 결과 커밋 & 푸시 ───────────────────────────────────────
+      - name: ⑦ 결과 커밋 & 푸시
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          git add stock_data.json docs/index.html output/us_stock_trend_analysis.html
+
+          # 변경사항 없으면 커밋 생략
+          if git diff --staged --quiet; then
+            echo "변경된 데이터 없음 - 커밋 생략"
+          else
+            MSG="chore: 주가 추세 분석 업데이트 $(date +'%Y-%m-%d %H:%M KST')"
+            [ -n "${{ github.event.inputs.note }}" ] && MSG="$MSG | ${{ github.event.inputs.note }}"
+            git commit -m "$MSG"
+            git push
+            echo "✅ 커밋 완료: $MSG"
+          fi
