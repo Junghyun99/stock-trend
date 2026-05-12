@@ -5,3 +5,4 @@ __pycache__/
 .DS_Store
 *.egg-info/
 universe_cache.json
+screener_cache.json
