@@ -11,110 +11,9 @@ import numpy as np
 from scipy import stats
 from datetime import datetime
 from collections import Counter
-import json, time
+import json, time, argparse
 
-# ── 탑 100 종목 리스트 ──────────────────────────────────────────────
-TOP_100 = [
-    ("AAPL",  "Apple",               "Technology"),
-    ("MSFT",  "Microsoft",           "Technology"),
-    ("NVDA",  "NVIDIA",              "Technology"),
-    ("AMZN",  "Amazon",              "Consumer Disc."),
-    ("GOOGL", "Alphabet (A)",        "Technology"),
-    ("META",  "Meta Platforms",      "Technology"),
-    ("TSLA",  "Tesla",               "Consumer Disc."),
-    ("BRK-B", "Berkshire Hathaway",  "Financials"),
-    ("TSM",   "TSMC",                "Technology"),
-    ("LLY",   "Eli Lilly",           "Healthcare"),
-    ("AVGO",  "Broadcom",            "Technology"),
-    ("JPM",   "JPMorgan Chase",      "Financials"),
-    ("V",     "Visa",                "Financials"),
-    ("UNH",   "UnitedHealth",        "Healthcare"),
-    ("XOM",   "ExxonMobil",          "Energy"),
-    ("MA",    "Mastercard",          "Financials"),
-    ("COST",  "Costco",              "Consumer Staples"),
-    ("HD",    "Home Depot",          "Consumer Disc."),
-    ("JNJ",   "Johnson & Johnson",   "Healthcare"),
-    ("PG",    "Procter & Gamble",    "Consumer Staples"),
-    ("WMT",   "Walmart",             "Consumer Staples"),
-    ("NFLX",  "Netflix",             "Technology"),
-    ("ORCL",  "Oracle",              "Technology"),
-    ("BAC",   "Bank of America",     "Financials"),
-    ("ABBV",  "AbbVie",              "Healthcare"),
-    ("CRM",   "Salesforce",          "Technology"),
-    ("CVX",   "Chevron",             "Energy"),
-    ("KO",    "Coca-Cola",           "Consumer Staples"),
-    ("AMD",   "Advanced Micro Dev.", "Technology"),
-    ("MRK",   "Merck",               "Healthcare"),
-    ("WFC",   "Wells Fargo",         "Financials"),
-    ("ASML",  "ASML Holding",        "Technology"),
-    ("ACN",   "Accenture",           "Technology"),
-    ("TMO",   "Thermo Fisher",       "Healthcare"),
-    ("MCD",   "McDonald's",          "Consumer Disc."),
-    ("CSCO",  "Cisco Systems",       "Technology"),
-    ("NOW",   "ServiceNow",          "Technology"),
-    ("ABT",   "Abbott Labs",         "Healthcare"),
-    ("ADBE",  "Adobe",               "Technology"),
-    ("GS",    "Goldman Sachs",       "Financials"),
-    ("IBM",   "IBM",                 "Technology"),
-    ("PEP",   "PepsiCo",             "Consumer Staples"),
-    ("ISRG",  "Intuitive Surgical",  "Healthcare"),
-    ("TXN",   "Texas Instruments",   "Technology"),
-    ("MS",    "Morgan Stanley",      "Financials"),
-    ("DHR",   "Danaher",             "Healthcare"),
-    ("INTU",  "Intuit",              "Technology"),
-    ("GE",    "GE Aerospace",        "Industrials"),
-    ("QCOM",  "Qualcomm",            "Technology"),
-    ("CAT",   "Caterpillar",         "Industrials"),
-    ("AMGN",  "Amgen",               "Healthcare"),
-    ("BKNG",  "Booking Holdings",    "Consumer Disc."),
-    ("SPGI",  "S&P Global",          "Financials"),
-    ("NEE",   "NextEra Energy",      "Utilities"),
-    ("AXP",   "American Express",    "Financials"),
-    ("UBER",  "Uber Technologies",   "Technology"),
-    ("T",     "AT&T",                "Communication"),
-    ("LOW",   "Lowe's",              "Consumer Disc."),
-    ("AMAT",  "Applied Materials",   "Technology"),
-    ("DE",    "Deere & Company",     "Industrials"),
-    ("BLK",   "BlackRock",           "Financials"),
-    ("VRTX",  "Vertex Pharma",       "Healthcare"),
-    ("GILD",  "Gilead Sciences",     "Healthcare"),
-    ("ETN",   "Eaton Corp",          "Industrials"),
-    ("BMY",   "Bristol-Myers Squibb","Healthcare"),
-    ("ADP",   "ADP",                 "Technology"),
-    ("SYK",   "Stryker",             "Healthcare"),
-    ("LRCX",  "Lam Research",        "Technology"),
-    ("CB",    "Chubb",               "Financials"),
-    ("MDT",   "Medtronic",           "Healthcare"),
-    ("KLAC",  "KLA Corp",            "Technology"),
-    ("C",     "Citigroup",           "Financials"),
-    ("SO",    "Southern Company",    "Utilities"),
-    ("MU",    "Micron Technology",   "Technology"),
-    ("PLD",   "Prologis",            "Real Estate"),
-    ("SCHW",  "Charles Schwab",      "Financials"),
-    ("ZTS",   "Zoetis",              "Healthcare"),
-    ("MMC",   "Marsh McLennan",      "Financials"),
-    ("REGN",  "Regeneron Pharma",    "Healthcare"),
-    ("CME",   "CME Group",           "Financials"),
-    ("TJX",   "TJX Companies",       "Consumer Disc."),
-    ("DUK",   "Duke Energy",         "Utilities"),
-    ("PANW",  "Palo Alto Networks",  "Technology"),
-    ("ICE",   "Intercontinental Exch","Financials"),
-    ("PH",    "Parker Hannifin",     "Industrials"),
-    ("CL",    "Colgate-Palmolive",   "Consumer Staples"),
-    ("EOG",   "EOG Resources",       "Energy"),
-    ("SHW",   "Sherwin-Williams",    "Materials"),
-    ("CDNS",  "Cadence Design",      "Technology"),
-    ("SNPS",  "Synopsys",            "Technology"),
-    ("MSI",   "Motorola Solutions",  "Technology"),
-    ("HCA",   "HCA Healthcare",      "Healthcare"),
-    ("ITW",   "Illinois Tool Works", "Industrials"),
-    ("AMT",   "American Tower",      "Real Estate"),
-    ("NSC",   "Norfolk Southern",    "Industrials"),
-    ("FCX",   "Freeport-McMoRan",    "Materials"),
-    ("WDAY",  "Workday",             "Technology"),
-    ("AON",   "Aon plc",             "Financials"),
-    ("MELI",  "MercadoLibre",        "Consumer Disc."),
-]
+from fetch_universe import get_top_n
 
 
 # ── 데이터 수집 ──────────────────────────────────────────────────────
@@ -218,16 +117,25 @@ def normalize_prices(prices: pd.Series, max_points: int = 36) -> tuple[list, lis
 
 # ── 메인 ─────────────────────────────────────────────────────────────
 def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("-n",      type=int,  default=100,  help="분석 종목 수 (기본 100)")
+    parser.add_argument("--force", action="store_true",     help="유니버스 캐시 무시하고 재조회")
+    args = parser.parse_args()
+
     print("=" * 62)
-    print("  미국 탑 100 기업 주가 추세 분석  (yfinance · 3Y monthly)")
+    print(f"  미국 탑 {args.n} 기업 주가 추세 분석  (yfinance · 3Y monthly)")
     print("  분류 기준: 선형회귀 기울기 + R² + 전/후반 기울기 비교")
     print("=" * 62)
+
+    # 동적 유니버스 조회 (S&P 500 시가총액 상위 N개)
+    universe = get_top_n(n=args.n, force_refresh=args.force)
+    print(f"\n📋 분석 대상: {len(universe)}개 종목\n")
 
     results  = []
     failures = []
 
-    for i, (ticker, name, sector) in enumerate(TOP_100, 1):
-        print(f"[{i:3d}/100] {ticker:7s} {name[:25]:25s}", end=" → ")
+    for i, (ticker, name, sector) in enumerate(universe, 1):
+        print(f"[{i:3d}/{args.n}] {ticker:7s} {name[:25]:25s}", end=" → ")
 
         prices = fetch_monthly_close(ticker)
         if prices is None:
