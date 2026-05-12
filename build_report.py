@@ -1,7 +1,6 @@
 """
 stock_data.json → 인터랙티브 HTML 리포트 생성
-- 주가 차트에 선형회귀 추세선 오버레이
-- slope / R² / 전후반 기울기 표시
+기간 탭 (3M / 1Y / 2Y / 3Y) 전환 지원
 """
 
 import json
@@ -15,11 +14,14 @@ def build_report(json_path="stock_data.json",
     with open(json_path, encoding="utf-8") as f:
         data = json.load(f)
 
-    stocks    = data["stocks"]
-    generated = data.get("generated_at", "")
-    method    = data.get("classify_method", "")
-    counts    = Counter(s["trend"] for s in stocks)
-    stocks_js = json.dumps(stocks, ensure_ascii=False)
+    stocks     = data["stocks"]
+    generated  = data.get("generated_at", "")
+    periods    = data.get("periods", {"3m":"3개월","1y":"1년","2y":"2년","3y":"3년"})
+    stocks_js  = json.dumps(stocks,  ensure_ascii=False)
+    periods_js = json.dumps(periods, ensure_ascii=False)
+
+    # 기간별 카운트 (초기 표시용 → 3y 기준)
+    counts_3y = Counter(s["periods"]["3y"]["trend"] for s in stocks)
 
     html = f"""<!DOCTYPE html>
 <html lang="ko">
@@ -39,81 +41,111 @@ def build_report(json_path="stock_data.json",
   --radius:12px;--shadow:0 1px 8px rgba(0,0,0,.08)
 }}
 body{{font-family:'Segoe UI',-apple-system,sans-serif;background:#f1f5f9;color:var(--text)}}
-.header{{background:linear-gradient(135deg,#0f172a,#1e3a5f);color:#fff;padding:30px 24px 24px}}
-.header h1{{font-size:1.6rem;font-weight:700;margin-bottom:5px}}
-.header p{{font-size:.82rem;color:#94a3b8;line-height:1.6}}
-.badge-method{{display:inline-block;margin-top:8px;background:rgba(99,102,241,.3);border:1px solid rgba(99,102,241,.5);
-  border-radius:6px;padding:4px 10px;font-size:.75rem;color:#c7d2fe}}
 
-.summary{{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;padding:18px 24px;max-width:1440px;margin:0 auto}}
-.scard{{background:var(--card);border-radius:var(--radius);padding:18px 20px;box-shadow:var(--shadow);
-  cursor:pointer;border:2px solid transparent;transition:.18s}}
+/* ── 헤더 ── */
+.header{{background:linear-gradient(135deg,#0f172a,#1e3a5f);color:#fff;padding:28px 24px 20px}}
+.header h1{{font-size:1.55rem;font-weight:700;margin-bottom:4px}}
+.header p{{font-size:.8rem;color:#94a3b8}}
+.badge-m{{display:inline-block;margin-top:8px;background:rgba(99,102,241,.3);
+  border:1px solid rgba(99,102,241,.5);border-radius:6px;padding:3px 10px;
+  font-size:.73rem;color:#c7d2fe}}
+
+/* ── 기간 탭 ── */
+.period-bar{{background:#1e293b;padding:0 24px;display:flex;align-items:center;gap:4px}}
+.period-bar .plabel{{font-size:.75rem;color:#64748b;margin-right:8px;white-space:nowrap}}
+.ptab{{padding:10px 20px;font-size:.85rem;font-weight:600;color:#94a3b8;
+  border:none;background:none;cursor:pointer;border-bottom:3px solid transparent;
+  transition:.15s;white-space:nowrap}}
+.ptab:hover{{color:#e2e8f0}}
+.ptab.active{{color:#fff;border-bottom-color:#6366f1}}
+
+/* ── 요약 카드 ── */
+.summary{{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;
+  padding:16px 24px;max-width:1440px;margin:0 auto}}
+.scard{{background:var(--card);border-radius:var(--radius);padding:16px 18px;
+  box-shadow:var(--shadow);cursor:pointer;border:2px solid transparent;transition:.18s}}
 .scard:hover,.scard.active{{border-color:var(--ac);box-shadow:0 4px 16px rgba(0,0,0,.1)}}
-.scard .ico{{font-size:1.6rem;margin-bottom:6px}}
-.scard .lbl{{font-size:.9rem;font-weight:700;color:var(--ac)}}
-.scard .cnt{{font-size:1.9rem;font-weight:800;line-height:1.1}}
-.scard .dsc{{font-size:.7rem;color:var(--text2);margin-top:3px;line-height:1.4}}
+.scard .ico{{font-size:1.5rem;margin-bottom:5px}}
+.scard .lbl{{font-size:.88rem;font-weight:700;color:var(--ac)}}
+.scard .cnt{{font-size:1.8rem;font-weight:800;line-height:1.1}}
+.scard .dsc{{font-size:.68rem;color:var(--text2);margin-top:3px;line-height:1.4}}
 .scard.g{{--ac:var(--green)}}.scard.y{{--ac:var(--yellow)}}
 .scard.r{{--ac:var(--red)}}.scard.b{{--ac:var(--blue)}}
 
-.controls{{max-width:1440px;margin:0 auto;padding:0 24px 14px;display:flex;gap:10px;flex-wrap:wrap;align-items:center}}
+/* ── 컨트롤 ── */
+.controls{{max-width:1440px;margin:0 auto;padding:0 24px 12px;
+  display:flex;gap:10px;flex-wrap:wrap;align-items:center}}
 .srch{{flex:1;min-width:160px;position:relative}}
-.srch input{{width:100%;padding:8px 12px 8px 34px;border:1.5px solid #e2e8f0;border-radius:8px;
-  font-size:.85rem;background:#fff;outline:none;transition:.2s}}
+.srch input{{width:100%;padding:8px 12px 8px 32px;border:1.5px solid #e2e8f0;
+  border-radius:8px;font-size:.83rem;background:#fff;outline:none;transition:.2s}}
 .srch input:focus{{border-color:#6366f1}}
-.srch .ico{{position:absolute;left:10px;top:50%;transform:translateY(-50%);color:#9ca3af;font-size:.85rem}}
-select{{padding:8px 12px;border:1.5px solid #e2e8f0;border-radius:8px;font-size:.85rem;background:#fff;cursor:pointer;outline:none}}
-.stat{{font-size:.78rem;color:var(--text2);margin-left:auto;white-space:nowrap}}
+.srch .ico{{position:absolute;left:9px;top:50%;transform:translateY(-50%);color:#9ca3af;font-size:.8rem}}
+select{{padding:8px 12px;border:1.5px solid #e2e8f0;border-radius:8px;
+  font-size:.83rem;background:#fff;cursor:pointer;outline:none}}
+.stat{{font-size:.76rem;color:var(--text2);margin-left:auto;white-space:nowrap}}
 
+/* ── 카드 그리드 ── */
 .grid{{max-width:1440px;margin:0 auto;padding:0 24px 40px;
-  display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:16px}}
-
-.card{{background:var(--card);border-radius:var(--radius);padding:16px 16px 12px;
+  display:grid;grid-template-columns:repeat(auto-fill,minmax(310px,1fr));gap:15px}}
+.card{{background:var(--card);border-radius:var(--radius);padding:15px 15px 11px;
   box-shadow:var(--shadow);transition:.18s;border-left:4px solid var(--ca);cursor:pointer}}
 .card:hover{{box-shadow:0 5px 20px rgba(0,0,0,.1);transform:translateY(-1px)}}
 .card.t-bullish{{--ca:var(--green)}}.card.t-sideways{{--ca:var(--yellow)}}
 .card.t-bearish{{--ca:var(--red)}}.card.t-recovering{{--ca:var(--blue)}}
 
-.ch{{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:8px}}
-.tk{{font-size:1.05rem;font-weight:800;letter-spacing:.02em}}
-.badge{{font-size:.66rem;font-weight:700;padding:2px 7px;border-radius:16px;display:flex;align-items:center;gap:2px}}
+.ch{{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:7px}}
+.tk{{font-size:1rem;font-weight:800;letter-spacing:.02em}}
+.badge{{font-size:.64rem;font-weight:700;padding:2px 7px;border-radius:14px;
+  display:flex;align-items:center;gap:2px}}
 .badge.t-bullish{{background:var(--green-bg);color:#16a34a;border:1px solid var(--green-bd)}}
 .badge.t-sideways{{background:var(--yellow-bg);color:#b45309;border:1px solid var(--yellow-bd)}}
 .badge.t-bearish{{background:var(--red-bg);color:var(--red);border:1px solid var(--red-bd)}}
 .badge.t-recovering{{background:var(--blue-bg);color:var(--blue);border:1px solid var(--blue-bd)}}
-.nm{{font-size:.75rem;color:var(--text2);margin-bottom:1px}}
-.sc{{font-size:.66rem;color:#9ca3af}}
+.nm{{font-size:.73rem;color:var(--text2);margin-bottom:1px}}
+.sc{{font-size:.64rem;color:#9ca3af}}
 
-.mets{{display:grid;grid-template-columns:repeat(4,1fr);gap:5px;margin:10px 0 6px}}
-.met{{text-align:center;padding:6px 2px;background:var(--surface);border-radius:7px}}
-.met .v{{font-size:.82rem;font-weight:700}}
-.met .l{{font-size:.58rem;color:var(--text2);margin-top:1px}}
+.mets{{display:grid;grid-template-columns:repeat(4,1fr);gap:4px;margin:9px 0 5px}}
+.met{{text-align:center;padding:5px 2px;background:var(--surface);border-radius:7px}}
+.met .v{{font-size:.8rem;font-weight:700}}
+.met .l{{font-size:.56rem;color:var(--text2);margin-top:1px}}
 .pos{{color:#16a34a}}.neg{{color:var(--red)}}.neu{{color:var(--text2)}}
 
-.cw{{height:85px;margin-top:8px}}
+.cw{{height:80px;margin-top:7px}}
 
-/* 모달 */
-.ov{{display:none;position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:1000;align-items:center;justify-content:center}}
+/* ── 모달 ── */
+.ov{{display:none;position:fixed;inset:0;background:rgba(0,0,0,.55);
+  z-index:1000;align-items:center;justify-content:center}}
 .ov.open{{display:flex}}
-.modal{{background:#fff;border-radius:16px;width:min(680px,96vw);max-height:92vh;overflow-y:auto;
-  padding:26px;box-shadow:0 24px 60px rgba(0,0,0,.25);position:relative}}
-.modal h2{{font-size:1.35rem;font-weight:800;margin-bottom:3px}}
-.modal .sub{{font-size:.8rem;color:var(--text2);margin-bottom:12px}}
-.mc{{height:240px;margin:12px 0 16px}}
+.modal{{background:#fff;border-radius:16px;width:min(700px,96vw);
+  max-height:92vh;overflow-y:auto;padding:24px;
+  box-shadow:0 24px 60px rgba(0,0,0,.25);position:relative}}
+.modal h2{{font-size:1.3rem;font-weight:800;margin-bottom:3px}}
+.modal .sub{{font-size:.78rem;color:var(--text2);margin-bottom:10px}}
+
+/* 모달 내 기간 탭 */
+.modal-tabs{{display:flex;gap:4px;margin-bottom:14px;border-bottom:2px solid #f1f5f9;padding-bottom:2px}}
+.mtab{{padding:6px 16px;font-size:.82rem;font-weight:600;color:var(--text2);
+  border:none;background:none;cursor:pointer;border-bottom:3px solid transparent;
+  margin-bottom:-4px;transition:.15s}}
+.mtab.active{{color:#6366f1;border-bottom-color:#6366f1}}
+
+.mc{{height:230px;margin:8px 0 14px}}
 .mm{{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:12px}}
-.mmk{{background:var(--surface);padding:12px;border-radius:9px;text-align:center}}
-.mmk .v{{font-size:1.1rem;font-weight:800}}
-.mmk .l{{font-size:.68rem;color:var(--text2);margin-top:2px}}
-.reg-box{{background:#f8fafc;border:1px solid #e2e8f0;border-radius:9px;padding:12px 14px;font-size:.8rem;line-height:1.8}}
+.mmk{{background:var(--surface);padding:11px;border-radius:9px;text-align:center}}
+.mmk .v{{font-size:1rem;font-weight:800}}
+.mmk .l{{font-size:.65rem;color:var(--text2);margin-top:2px}}
+.reg-box{{background:#f8fafc;border:1px solid #e2e8f0;border-radius:9px;
+  padding:11px 14px;font-size:.78rem;line-height:1.9}}
 .reg-box b{{color:#334155}}
 .xbtn{{position:absolute;top:14px;right:18px;font-size:1.3rem;cursor:pointer;
-  color:var(--text2);background:none;border:none;line-height:1}}
+  color:var(--text2);background:none;border:none}}
 
 @media(max-width:640px){{
   .summary{{grid-template-columns:repeat(2,1fr)}}
   .grid{{grid-template-columns:1fr}}
-  .header h1{{font-size:1.25rem}}
+  .header h1{{font-size:1.2rem}}
   .mets{{grid-template-columns:repeat(2,1fr)}}
+  .mm{{grid-template-columns:repeat(2,1fr)}}
 }}
 </style>
 </head>
@@ -121,37 +153,48 @@ select{{padding:8px 12px;border:1.5px solid #e2e8f0;border-radius:8px;font-size:
 
 <div class="header">
   <h1>📈 미국 상장 탑 100 기업 주가 추세 분석</h1>
-  <p>yfinance 3년 월봉 실데이터 · 생성일시: {generated}</p>
-  <span class="badge-method">📐 분류 방법: 선형회귀 기울기(slope) + 결정계수(R²) + 전/후반부 기울기 비교</span>
+  <p>yfinance 실데이터 · 생성일시: {generated}</p>
+  <span class="badge-m">📐 분류: 선형회귀 slope + R² + 전/후반 기울기 비교</span>
 </div>
 
+<!-- 기간 탭 -->
+<div class="period-bar">
+  <span class="plabel">분석 기간</span>
+  <button class="ptab" data-pid="3m"  onclick="switchPeriod('3m',this)">3개월</button>
+  <button class="ptab" data-pid="1y"  onclick="switchPeriod('1y',this)">1년</button>
+  <button class="ptab" data-pid="2y"  onclick="switchPeriod('2y',this)">2년</button>
+  <button class="ptab active" data-pid="3y" onclick="switchPeriod('3y',this)">3년</button>
+</div>
+
+<!-- 요약 카드 -->
 <div class="summary">
   <div class="scard g active" onclick="filt('bullish',this)">
     <div class="ico">🟢</div><div class="lbl">강세장 (Bullish)</div>
-    <div class="cnt">{counts['bullish']}</div>
-    <div class="dsc">slope &gt; 0 · R² 양호 · 우상향 추세선</div>
+    <div class="cnt" id="cnt-bullish">{counts_3y['bullish']}</div>
+    <div class="dsc">slope↑ · R² 양호 · 우상향 추세선</div>
   </div>
   <div class="scard y" onclick="filt('sideways',this)">
     <div class="ico">🟡</div><div class="lbl">횡보장 (Sideways)</div>
-    <div class="cnt">{counts['sideways']}</div>
-    <div class="dsc">기울기 약하거나 R² 낮음 · 방향성 불명확</div>
+    <div class="cnt" id="cnt-sideways">{counts_3y['sideways']}</div>
+    <div class="dsc">기울기 약함 · R² 낮음 · 방향 불명확</div>
   </div>
   <div class="scard r" onclick="filt('bearish',this)">
     <div class="ico">🔴</div><div class="lbl">하락장 (Bearish)</div>
-    <div class="cnt">{counts['bearish']}</div>
-    <div class="dsc">slope &lt; 0 · R² 양호 · 우하향 추세선</div>
+    <div class="cnt" id="cnt-bearish">{counts_3y['bearish']}</div>
+    <div class="dsc">slope↓ · R² 양호 · 우하향 추세선</div>
   </div>
   <div class="scard b" onclick="filt('recovering',this)">
     <div class="ico">🔵</div><div class="lbl">반등 중 (Recovering)</div>
-    <div class="cnt">{counts['recovering']}</div>
-    <div class="dsc">전반 기울기↓ → 후반 기울기↑ (V/U자)</div>
+    <div class="cnt" id="cnt-recovering">{counts_3y['recovering']}</div>
+    <div class="dsc">전반↓ → 후반↑ (V/U자 전환)</div>
   </div>
 </div>
 
+<!-- 필터 컨트롤 -->
 <div class="controls">
   <div class="srch">
     <span class="ico">🔍</span>
-    <input id="si" type="text" placeholder="종목 검색 (AAPL, Apple...)" oninput="render()">
+    <input id="si" type="text" placeholder="종목 검색..." oninput="render()">
   </div>
   <select id="sf" onchange="render()">
     <option value="">전체 섹터</option>
@@ -165,18 +208,21 @@ select{{padding:8px 12px;border:1.5px solid #e2e8f0;border-radius:8px;font-size:
     <option value="slope_d">slope 높은순</option>
     <option value="slope_a">slope 낮은순</option>
     <option value="r2_d">R² 높은순</option>
-    <option value="ret_d">3Y 수익률 높은순</option>
+    <option value="ret_d">수익률 높은순</option>
   </select>
   <div class="stat" id="st"></div>
 </div>
 
 <div class="grid" id="grid"></div>
 
+<!-- 상세 모달 -->
 <div class="ov" id="ov" onclick="closeOv(event)">
   <div class="modal">
     <button class="xbtn" onclick="document.getElementById('ov').classList.remove('open')">✕</button>
-    <h2 id="mt">-</h2><div class="sub" id="ms">-</div>
+    <h2 id="mt">-</h2>
+    <div class="sub" id="ms">-</div>
     <div id="mb"></div>
+    <div class="modal-tabs" id="mtabs"></div>
     <div class="mc"><canvas id="mc"></canvas></div>
     <div class="mm" id="mm"></div>
     <div class="reg-box" id="mr"></div>
@@ -185,6 +231,8 @@ select{{padding:8px 12px;border:1.5px solid #e2e8f0;border-radius:8px;font-size:
 
 <script>
 const S  = {stocks_js};
+const PM = {periods_js};  // {{"3m":"3개월","1y":"1년",...}}
+
 const TM = {{
   bullish:    {{ko:"강세장",  e:"🟢", c:"#22c55e", f:"rgba(34,197,94,.12)"}},
   sideways:   {{ko:"횡보장",  e:"🟡", c:"#d97706", f:"rgba(217,119,6,.10)"}},
@@ -192,105 +240,189 @@ const TM = {{
   recovering: {{ko:"반등 중", e:"🔵", c:"#3b82f6", f:"rgba(59,130,246,.10)"}},
 }};
 
-let cur="bullish", minis={{}}, mInst=null;
-const cv = v => v>0?`<span class="pos">+${{v}}%</span>`:v<0?`<span class="neg">${{v}}%</span>`:`<span class="neu">${{v}}%</span>`;
-const fv = v => v>0?`<span class="pos">+${{v}}</span>`:v<0?`<span class="neg">${{v}}</span>`:`<span class="neu">${{v}}</span>`;
+let curPeriod  = "3y";
+let curTrend   = "bullish";
+let minis      = {{}};
+let mInst      = null;
+let mModalPid  = "3y";   // 모달 내 선택 기간
+let mTicker    = null;
 
-function getList(){{
-  const q=document.getElementById('si').value.toLowerCase();
-  const sc=document.getElementById('sf').value;
-  const st=document.getElementById('ss').value;
-  let L=S.filter(s=>(!cur||s.trend===cur)&&(!q||s.ticker.toLowerCase().includes(q)||s.name.toLowerCase().includes(q))&&(!sc||s.sector===sc));
-  if(st==='slope_d') L.sort((a,b)=>b.slope_pct-a.slope_pct);
-  else if(st==='slope_a') L.sort((a,b)=>a.slope_pct-b.slope_pct);
-  else if(st==='r2_d')    L.sort((a,b)=>b.r2-a.r2);
-  else if(st==='ret_d')   L.sort((a,b)=>b.total_return-a.total_return);
+const cv = v => v>0 ? `<span class="pos">+${{v}}%</span>`
+               : v<0 ? `<span class="neg">${{v}}%</span>`
+               :        `<span class="neu">${{v}}%</span>`;
+const fv = v => v>0 ? `<span class="pos">+${{v}}</span>`
+               : v<0 ? `<span class="neg">${{v}}</span>`
+               :        `<span class="neu">${{v}}</span>`;
+
+// ── 기간 전환 ────────────────────────────────────────────────────────
+function switchPeriod(pid, el) {{
+  curPeriod = pid;
+  document.querySelectorAll('.ptab').forEach(t => t.classList.remove('active'));
+  el.classList.add('active');
+  updateCounts();
+  render();
+}}
+
+function updateCounts() {{
+  const cnt = {{bullish:0, sideways:0, bearish:0, recovering:0}};
+  S.forEach(s => {{
+    const p = s.periods[curPeriod];
+    if (p) cnt[p.trend]++;
+  }});
+  ['bullish','sideways','bearish','recovering'].forEach(t => {{
+    document.getElementById('cnt-' + t).textContent = cnt[t];
+  }});
+}}
+
+// ── 카드 필터/정렬 ──────────────────────────────────────────────────
+function getList() {{
+  const q  = document.getElementById('si').value.toLowerCase();
+  const sc = document.getElementById('sf').value;
+  const st = document.getElementById('ss').value;
+
+  let L = S.filter(s => {{
+    const p = s.periods[curPeriod];
+    if (!p) return false;
+    return (!curTrend || p.trend === curTrend)
+        && (!q  || s.ticker.toLowerCase().includes(q) || s.name.toLowerCase().includes(q))
+        && (!sc || s.sector === sc);
+  }});
+
+  if      (st === 'slope_d') L.sort((a,b) => b.periods[curPeriod].slope_pct - a.periods[curPeriod].slope_pct);
+  else if (st === 'slope_a') L.sort((a,b) => a.periods[curPeriod].slope_pct - b.periods[curPeriod].slope_pct);
+  else if (st === 'r2_d')    L.sort((a,b) => b.periods[curPeriod].r2         - a.periods[curPeriod].r2);
+  else if (st === 'ret_d')   L.sort((a,b) => b.periods[curPeriod].total_return - a.periods[curPeriod].total_return);
   return L;
 }}
 
-function render(){{
-  Object.values(minis).forEach(c=>c.destroy()); minis={{}};
-  const L=getList();
-  document.getElementById('st').textContent=`${{L.length}}개 표시 / 전체 ${{S.length}}개`;
-  document.getElementById('grid').innerHTML=L.map(s=>{{
-    const m=TM[s.trend];
-    return `<div class="card t-${{s.trend}}" onclick="openM('${{s.ticker}}')">
+// ── 카드 렌더 ────────────────────────────────────────────────────────
+function render() {{
+  Object.values(minis).forEach(c => c.destroy()); minis = {{}};
+  const L = getList();
+  document.getElementById('st').textContent = `${{L.length}}개 표시 / 전체 ${{S.length}}개`;
+
+  document.getElementById('grid').innerHTML = L.map(s => {{
+    const p = s.periods[curPeriod];
+    const m = TM[p.trend];
+    return `<div class="card t-${{p.trend}}" onclick="openM('${{s.ticker}}')">
       <div class="ch">
         <div><div class="tk">${{s.ticker}}</div><div class="nm">${{s.name}}</div><div class="sc">${{s.sector}}</div></div>
-        <div class="badge t-${{s.trend}}">${{m.e}} ${{m.ko}}</div>
+        <div class="badge t-${{p.trend}}">${{m.e}} ${{m.ko}}</div>
       </div>
       <div class="mets">
-        <div class="met"><div class="v">${{fv(s.slope_pct)}}<span style="font-size:.6rem">%/월</span></div><div class="l">slope</div></div>
-        <div class="met"><div class="v">${{s.r2}}</div><div class="l">R²</div></div>
-        <div class="met"><div class="v">${{cv(s.total_return)}}</div><div class="l">3Y 수익</div></div>
-        <div class="met"><div class="v">${{cv(s.return_6m)}}</div><div class="l">6M 수익</div></div>
+        <div class="met"><div class="v">${{fv(p.slope_pct)}}<span style="font-size:.5rem">/봉</span></div><div class="l">slope</div></div>
+        <div class="met"><div class="v">${{p.r2}}</div><div class="l">R²</div></div>
+        <div class="met"><div class="v">${{cv(p.total_return)}}</div><div class="l">수익률</div></div>
+        <div class="met"><div class="v">${{PM[curPeriod]}}</div><div class="l">기간</div></div>
       </div>
       <div class="cw"><canvas id="mc-${{s.ticker}}"></canvas></div>
     </div>`;
   }}).join('');
-  L.forEach(s=>{{
-    const el=document.getElementById('mc-'+s.ticker); if(!el) return;
-    const m=TM[s.trend];
-    minis[s.ticker]=new Chart(el,{{
-      type:'line',
-      data:{{labels:s.chart_labels, datasets:[
-        {{data:s.chart_data, borderColor:m.c, backgroundColor:m.f,
-          borderWidth:1.8, pointRadius:0, fill:true, tension:0.3, order:2}},
-        {{data:s.regression, borderColor:'rgba(100,116,139,.55)',
-          borderWidth:1.5, borderDash:[4,3], pointRadius:0, fill:false, tension:0, order:1}}
+
+  L.forEach(s => {{
+    const el = document.getElementById('mc-' + s.ticker); if (!el) return;
+    const p  = s.periods[curPeriod];
+    const m  = TM[p.trend];
+    minis[s.ticker] = new Chart(el, {{
+      type: 'line',
+      data: {{ labels: p.chart_labels, datasets: [
+        {{ data: p.chart_data,  borderColor: m.c, backgroundColor: m.f,
+           borderWidth: 1.8, pointRadius: 0, fill: true, tension: 0.3, order: 2 }},
+        {{ data: p.regression,  borderColor: 'rgba(100,116,139,.5)',
+           borderWidth: 1.5, borderDash: [4,3], pointRadius: 0, fill: false, tension: 0, order: 1 }}
       ]}},
-      options:{{responsive:true, maintainAspectRatio:false, animation:false,
-        plugins:{{legend:{{display:false}},tooltip:{{enabled:false}}}},
-        scales:{{x:{{display:false}},y:{{display:false,grace:'8%'}}}}}}
+      options: {{ responsive: true, maintainAspectRatio: false, animation: false,
+        plugins: {{ legend: {{ display: false }}, tooltip: {{ enabled: false }} }},
+        scales:  {{ x: {{ display: false }}, y: {{ display: false, grace: '8%' }} }}
+      }}
     }});
   }});
 }}
 
-function filt(t,el){{
-  document.querySelectorAll('.scard').forEach(c=>c.classList.remove('active'));
-  el.classList.add('active'); cur=t; render();
+// ── 추세 필터 ────────────────────────────────────────────────────────
+function filt(t, el) {{
+  document.querySelectorAll('.scard').forEach(c => c.classList.remove('active'));
+  el.classList.add('active'); curTrend = t; render();
 }}
 
-function openM(tk){{
-  const s=S.find(x=>x.ticker===tk); if(!s) return;
-  const m=TM[s.trend];
-  document.getElementById('mt').textContent=`${{s.ticker}}  ${{s.name}}`;
-  document.getElementById('ms').textContent=`${{s.sector}} · 현재가 $${{s.current_price}}`;
-  document.getElementById('mb').innerHTML=`<span class="badge t-${{s.trend}}">${{m.e}} ${{m.ko}}</span><br><br>`;
-  document.getElementById('mm').innerHTML=`
-    <div class="mmk"><div class="v">${{fv(s.slope_pct)}}<small>%/월</small></div><div class="l">월 기울기 (slope)</div></div>
-    <div class="mmk"><div class="v">${{s.r2}}</div><div class="l">결정계수 R²</div></div>
-    <div class="mmk"><div class="v">${{cv(s.total_return)}}</div><div class="l">3년 누적 수익</div></div>
-    <div class="mmk"><div class="v">${{cv(s.return_1y)}}</div><div class="l">1년 수익</div></div>`;
-  document.getElementById('mr').innerHTML=`
-    <b>📐 추세선 분석</b><br>
-    전반부 기울기 (early 2/3): <b>${{s.slope_early_pct > 0 ? '▲ +' : '▼ '}}${{s.slope_early_pct}}%/월</b><br>
-    후반부 기울기 (late  1/3): <b>${{s.slope_late_pct  > 0 ? '▲ +' : '▼ '}}${{s.slope_late_pct}}%/월</b><br>
-    전체 추세 방향: <b>${{s.slope_pct > 0 ? '▲ 상승' : '▼ 하락'}}</b> · 추세 명확도: <b>R² = ${{s.r2}}</b>
-    ${{s.trend==='recovering' ? '<br>⚡ <b>전반 하락 → 후반 반등 전환 감지</b>' : ''}}`;
-  if(mInst){{mInst.destroy();mInst=null;}}
-  mInst=new Chart(document.getElementById('mc'),{{
-    type:'line',
-    data:{{labels:s.chart_labels, datasets:[
-      {{label:s.ticker+' 주가 (정규화)',
-        data:s.chart_data, borderColor:m.c, backgroundColor:m.f,
-        borderWidth:2.5, pointRadius:2, fill:true, tension:0.3, order:2}},
-      {{label:'선형회귀 추세선',
-        data:s.regression, borderColor:'#64748b',
-        borderWidth:2, borderDash:[5,4], pointRadius:0, fill:false, tension:0, order:1}}
-    ]}},
-    options:{{responsive:true, maintainAspectRatio:false,
-      plugins:{{legend:{{position:'top',labels:{{font:{{size:11}},boxWidth:20}}}},
-        tooltip:{{callbacks:{{label:c=>` ${{c.parsed.y.toFixed(1)}} (기준=100)`}}}}}},
-      scales:{{
-        x:{{ticks:{{maxTicksLimit:12,font:{{size:10}}}},grid:{{color:'#f1f5f9'}}}},
-        y:{{ticks:{{font:{{size:10}},callback:v=>v.toFixed(0)}},grid:{{color:'#f1f5f9'}}}}
-      }}}}
-  }});
+// ── 모달 ─────────────────────────────────────────────────────────────
+function openM(ticker) {{
+  mTicker   = ticker;
+  mModalPid = curPeriod;
+  const s   = S.find(x => x.ticker === ticker); if (!s) return;
+
+  document.getElementById('mt').textContent = `${{s.ticker}}  ${{s.name}}`;
+  document.getElementById('ms').textContent = `${{s.sector}} · 현재가 $${{s.current_price}}`;
+
+  // 기간 탭 생성
+  document.getElementById('mtabs').innerHTML = Object.entries(PM).map(([pid, label]) =>
+    `<button class="mtab${{pid === mModalPid ? ' active' : ''}}"
+       onclick="switchModalPeriod('${{pid}}',this)">${{label}}</button>`
+  ).join('');
+
+  renderModal(s, mModalPid);
   document.getElementById('ov').classList.add('open');
 }}
 
-function closeOv(e){{if(e.target===document.getElementById('ov')) document.getElementById('ov').classList.remove('open');}}
+function switchModalPeriod(pid, el) {{
+  mModalPid = pid;
+  document.querySelectorAll('.mtab').forEach(t => t.classList.remove('active'));
+  el.classList.add('active');
+  const s = S.find(x => x.ticker === mTicker);
+  if (s) renderModal(s, pid);
+}}
+
+function renderModal(s, pid) {{
+  const p = s.periods[pid];
+  const m = TM[p.trend];
+
+  document.getElementById('mb').innerHTML =
+    `<span class="badge t-${{p.trend}}">${{m.e}} ${{m.ko}}</span><br><br>`;
+
+  document.getElementById('mm').innerHTML = `
+    <div class="mmk"><div class="v">${{fv(p.slope_pct)}}<small>/봉</small></div><div class="l">slope</div></div>
+    <div class="mmk"><div class="v">${{p.r2}}</div><div class="l">R²</div></div>
+    <div class="mmk"><div class="v">${{cv(p.total_return)}}</div><div class="l">기간 수익률</div></div>
+    <div class="mmk"><div class="v">${{PM[pid]}}</div><div class="l">분석 기간</div></div>`;
+
+  document.getElementById('mr').innerHTML = `
+    <b>📐 추세선 분석 — ${{PM[pid]}}</b><br>
+    전반부 기울기: <b>${{p.slope_early_pct > 0 ? '▲ +' : '▼ '}}${{p.slope_early_pct}}%/봉</b><br>
+    후반부 기울기: <b>${{p.slope_late_pct  > 0 ? '▲ +' : '▼ '}}${{p.slope_late_pct}}%/봉</b><br>
+    추세 명확도: <b>R² = ${{p.r2}}</b>
+    ${{p.trend === 'recovering' ? '<br>⚡ <b>전반 하락 → 후반 반등 전환 감지</b>' : ''}}`;
+
+  if (mInst) {{ mInst.destroy(); mInst = null; }}
+  mInst = new Chart(document.getElementById('mc'), {{
+    type: 'line',
+    data: {{ labels: p.chart_labels, datasets: [
+      {{ label: `${{s.ticker}} (${{PM[pid]}}, 정규화)`,
+         data: p.chart_data, borderColor: m.c, backgroundColor: m.f,
+         borderWidth: 2.5, pointRadius: 2, fill: true, tension: 0.3, order: 2 }},
+      {{ label: '선형회귀 추세선',
+         data: p.regression, borderColor: '#64748b',
+         borderWidth: 2, borderDash: [5,4], pointRadius: 0, fill: false, tension: 0, order: 1 }}
+    ]}},
+    options: {{ responsive: true, maintainAspectRatio: false,
+      plugins: {{
+        legend: {{ position:'top', labels:{{ font:{{size:11}}, boxWidth:18 }} }},
+        tooltip: {{ callbacks: {{ label: c => ` ${{c.parsed.y.toFixed(1)}} (기준=100)` }} }}
+      }},
+      scales: {{
+        x: {{ ticks: {{ maxTicksLimit: 12, font: {{size:10}} }}, grid: {{color:'#f1f5f9'}} }},
+        y: {{ ticks: {{ font:{{size:10}}, callback: v => v.toFixed(0) }}, grid: {{color:'#f1f5f9'}} }}
+      }}
+    }}
+  }});
+}}
+
+function closeOv(e) {{
+  if (e.target === document.getElementById('ov'))
+    document.getElementById('ov').classList.remove('open');
+}}
+
+// ── 초기화 ──────────────────────────────────────────────────────────
+updateCounts();
 render();
 </script>
 </body>

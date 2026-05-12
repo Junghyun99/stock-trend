@@ -1,8 +1,8 @@
 """
-미국 상장 탑 100 기업 주가 추세 분석기
-- yfinance로 3년 실데이터 수집
-- 선형회귀 기반 추세 자동 분류 (강세/횡보/하락/반등)
-- 결과를 JSON으로 저장
+미국 상장 탑 N 기업 주가 추세 분석기
+- yfinance로 4개 기간(3M/1Y/2Y/3Y) 데이터 동시 수집
+- 선형회귀 기울기(slope) + R² + 전/후반 기울기로 추세 분류
+- 결과를 stock_data.json 으로 저장
 """
 
 import yfinance as yf
@@ -16,118 +16,98 @@ import json, time, argparse
 from fetch_universe import get_top_n
 
 
+# ── 기간 설정 ────────────────────────────────────────────────────────
+# key        : HTML 탭 ID
+# yf_period  : yfinance period 파라미터
+# interval   : 봉 단위 (3M는 주봉, 나머지 월봉)
+# min_pts    : 분류에 필요한 최소 데이터 포인트 수
+# label      : 표시 이름
+
+PERIODS = {
+    "3m": dict(yf_period="3mo", interval="1wk", min_pts=8,  label="3개월"),
+    "1y": dict(yf_period="1y",  interval="1mo", min_pts=10, label="1년"),
+    "2y": dict(yf_period="2y",  interval="1mo", min_pts=18, label="2년"),
+    "3y": dict(yf_period="3y",  interval="1mo", min_pts=24, label="3년"),
+}
+
+
 # ── 데이터 수집 ──────────────────────────────────────────────────────
-def fetch_monthly_close(ticker: str, period: str = "3y") -> pd.Series | None:
+def fetch_close(ticker: str, yf_period: str, interval: str) -> pd.Series | None:
     try:
-        hist = yf.Ticker(ticker).history(period=period, interval="1mo")
-        if hist.empty or len(hist) < 18:
+        hist = yf.Ticker(ticker).history(period=yf_period, interval=interval)
+        if hist.empty:
             return None
         return hist["Close"].dropna()
     except Exception as e:
-        print(f"  ⚠  {ticker}: {e}")
+        print(f"  ⚠ {ticker} ({yf_period}): {e}")
         return None
 
 
 # ── 추세 분류 (선형회귀 기반) ────────────────────────────────────────
-def classify_trend(prices: pd.Series) -> dict:
+def classify_trend(prices: pd.Series, min_pts: int) -> dict | None:
     """
-    그래프 추세선 형태로 분류
-    
-    핵심 지표
-    ---------
-    slope_pct  : 전체 선형회귀 기울기 (월평균가 대비 %, 방향·속도)
-    r2         : 결정계수 (추세의 명확성 0~1)
-    slope_early: 전반 2/3 구간 기울기
-    slope_late : 후반 1/3 구간 기울기  ← 반등 감지 핵심
-    
-    분류 규칙
-    ---------
-    반등 : 전반 기울기 < 0  AND  후반 기울기 > 0  (V자 혹은 U자)
-    강세 : 전체 기울기 > 임계값  AND  R² 양호
-    하락 : 전체 기울기 < -임계값 AND  R² 양호
-    횡보 : 나머지 (기울기 약하거나 R² 낮아 추세 불명확)
+    slope_pct  : 전체 기울기 (평균가 대비 %/봉)
+    r2         : 결정계수 — 추세 명확도
+    slope_early: 전반 2/3 기울기
+    slope_late : 후반 1/3 기울기  → 반등 감지
     """
-    n    = len(prices)
+    if prices is None or len(prices) < min_pts:
+        return None
+
     vals = prices.values
+    n    = len(vals)
     x    = np.arange(n, dtype=float)
 
-    # ── 전체 선형회귀 ──
-    slope_all, intercept, r_val, p_val, _ = stats.linregress(x, vals)
-    r2        = r_val ** 2
-    slope_pct = slope_all / vals.mean() * 100   # 월 기울기 (평균가 대비 %)
+    slope_all, intercept, r_val, *_ = stats.linregress(x, vals)
+    r2        = round(r_val ** 2, 3)
+    slope_pct = round(slope_all / vals.mean() * 100, 3)
 
-    # ── 전반부 2/3 vs 후반부 1/3 기울기 ──
-    split     = max(6, int(n * 2 / 3))
-    x_e, v_e  = x[:split],  vals[:split]
-    x_l, v_l  = x[split:],  vals[split:]
+    split   = max(4, int(n * 2 / 3))
+    s_e, *_ = stats.linregress(x[:split], vals[:split])
+    s_l, *_ = stats.linregress(x[split:], vals[split:])
+    slope_e = round(s_e / vals[:split].mean() * 100, 3)
+    slope_l = round(s_l / vals[split:].mean() * 100, 3)
 
-    slope_e, *_ = stats.linregress(x_e, v_e)
-    slope_l, *_ = stats.linregress(x_l, v_l)
+    # 분류
+    if   slope_e < -0.2 and slope_l > 0.4:          trend = "recovering"
+    elif slope_pct >  0.3 and r2 >= 0.35:            trend = "bullish"
+    elif slope_pct < -0.3 and r2 >= 0.35:            trend = "bearish"
+    else:                                             trend = "sideways"
 
-    slope_e_pct = slope_e / v_e.mean() * 100   # 전반부 기울기 %
-    slope_l_pct = slope_l / v_l.mean() * 100   # 후반부 기울기 %
+    # 수익률 (보조)
+    total_ret = round((vals[-1] / vals[0] - 1) * 100, 1)
 
-    # ── 회귀선 (차트 오버레이용) ──
-    regression_line = [round(float(intercept + slope_all * i), 2) for i in x]
-
-    # ── 수익률 (보조 지표) ──
-    total_return = round((vals[-1] / vals[0] - 1) * 100, 1)
-    return_6m    = round((vals[-1] / vals[max(0, n-6)] - 1) * 100, 1)
-    return_1y    = round((vals[-1] / vals[max(0, n-12)] - 1) * 100, 1)
-
-    # ── 분류 ──
-    # 반등: 전반 하락 추세 → 후반 상승 전환 (V자/U자)
-    if slope_e_pct < -0.2 and slope_l_pct > 0.4:
-        trend = "recovering"
-
-    # 강세: 전체 기울기 양수 + 추세 명확 (R² ≥ 0.35)
-    elif slope_pct > 0.3 and r2 >= 0.35:
-        trend = "bullish"
-
-    # 하락: 전체 기울기 음수 + 추세 명확
-    elif slope_pct < -0.3 and r2 >= 0.35:
-        trend = "bearish"
-
-    # 횡보: 기울기 약하거나 R² 낮아 방향성 불명확
-    else:
-        trend = "sideways"
+    # 정규화 가격 + 회귀선 (base = 100)
+    base     = vals[0]
+    norm     = [round(v / base * 100, 2) for v in vals]
+    reg_norm = [round((intercept + slope_all * i) / base * 100, 2) for i in x]
+    labels   = [dt.strftime("%Y-%m-%d") for dt in prices.index]
 
     return {
         "trend":           trend,
-        "slope_pct":       round(slope_pct, 3),      # 월 기울기 (평균가 %)
-        "r2":              round(r2, 3),              # 결정계수
-        "slope_early_pct": round(slope_e_pct, 3),    # 전반부 기울기
-        "slope_late_pct":  round(slope_l_pct, 3),    # 후반부 기울기
-        "total_return":    total_return,
-        "return_6m":       return_6m,
-        "return_1y":       return_1y,
-        "regression_line": regression_line,
+        "slope_pct":       slope_pct,
+        "r2":              r2,
+        "slope_early_pct": slope_e,
+        "slope_late_pct":  slope_l,
+        "total_return":    total_ret,
+        "chart_labels":    labels,
+        "chart_data":      norm,
+        "regression":      reg_norm,
     }
-
-
-# ── 차트용 정규화 시리즈 ─────────────────────────────────────────────
-def normalize_prices(prices: pd.Series, max_points: int = 36) -> tuple[list, list, list]:
-    """base=100 정규화, (labels, price_values, regression_values) 반환"""
-    prices = prices.tail(max_points)
-    base   = prices.iloc[0]
-    labels = [dt.strftime("%Y-%m") for dt in prices.index]
-    values = [round(v / base * 100, 2) for v in prices.values]
-    return labels, values
 
 
 # ── 메인 ─────────────────────────────────────────────────────────────
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("-n",      type=int,  default=100,  help="분석 종목 수 (기본 100)")
-    parser.add_argument("--force", action="store_true",     help="유니버스 캐시 무시하고 재조회")
+    parser.add_argument("-n",      type=int, default=100,  help="분석 종목 수")
+    parser.add_argument("--force", action="store_true",    help="유니버스 캐시 무시")
     args = parser.parse_args()
 
     print("=" * 62)
-    print(f"  미국 탑 {args.n} 기업 주가 추세 분석  (yfinance · 3Y monthly)")
-    print("  분류 기준: 선형회귀 기울기 + R² + 전/후반 기울기 비교")
+    print(f"  미국 탑 {args.n} 기업 주가 추세 분석  —  4개 기간 동시 계산")
+    print(f"  기간: {' / '.join(p['label'] for p in PERIODS.values())}")
     print("=" * 62)
 
-    # 동적 유니버스 조회 (S&P 500 시가총액 상위 N개)
     universe = get_top_n(n=args.n, force_refresh=args.force)
     print(f"\n📋 분석 대상: {len(universe)}개 종목\n")
 
@@ -135,53 +115,57 @@ def main():
     failures = []
 
     for i, (ticker, name, sector) in enumerate(universe, 1):
-        print(f"[{i:3d}/{args.n}] {ticker:7s} {name[:25]:25s}", end=" → ")
+        print(f"[{i:3d}/{args.n}] {ticker:7s} {name[:22]:22s}", end="")
 
-        prices = fetch_monthly_close(ticker)
-        if prices is None:
-            print("SKIP")
+        # 4개 기간 데이터 수집
+        period_data = {}
+        ok = True
+        for pid, cfg in PERIODS.items():
+            prices = fetch_close(ticker, cfg["yf_period"], cfg["interval"])
+            info   = classify_trend(prices, cfg["min_pts"])
+            if info is None:
+                ok = False
+                break
+            period_data[pid] = info
+
+        if not ok:
+            print(" → SKIP")
             failures.append(ticker)
             continue
 
-        info     = classify_trend(prices)
-        labels, norm_data = normalize_prices(prices)
+        # 현재가 (3y 데이터 마지막값)
+        current_price = round(period_data["3y"]["chart_data"][-1]
+                              * fetch_close(ticker, "3y", "1mo").iloc[0] / 100, 2)
 
-        # 회귀선도 정규화
-        base = prices.dropna().iloc[0]
-        reg_raw = info.pop("regression_line")
-        reg_norm = [round(v / base * 100, 2) for v in reg_raw[-len(norm_data):]]
-
-        trend = info["trend"]
-        s_pct = info["slope_pct"]
-        r2    = info["r2"]
-        print(f"{trend:12s} | slope:{s_pct:+.3f}%/월  R²:{r2:.2f}  "
-              f"early:{info['slope_early_pct']:+.3f}  late:{info['slope_late_pct']:+.3f}")
+        # 기간별 추세 요약 출력
+        summary = "  ".join(
+            f"{pid}:{period_data[pid]['trend'][:4]}" for pid in PERIODS
+        )
+        print(f" → {summary}")
 
         results.append({
             "ticker":        ticker,
             "name":          name,
             "sector":        sector,
-            "current_price": round(float(prices.iloc[-1]), 2),
-            "chart_labels":  labels,
-            "chart_data":    norm_data,
-            "regression":    reg_norm,
-            **info,
+            "current_price": round(fetch_close(ticker, "3y", "1mo").iloc[-1], 2),
+            "periods":       period_data,
         })
-        time.sleep(0.3)
 
-    # ── 요약 ──
-    counts = Counter(r["trend"] for r in results)
+        time.sleep(0.4)
+
+    # ── 요약 (3Y 기준) ──
+    counts = Counter(r["periods"]["3y"]["trend"] for r in results)
     print("\n" + "=" * 62)
-    print(f"✅ 완료: {len(results):3d}개   ❌ 실패: {len(failures):2d}개")
-    print(f"  🟢 강세장   (Bullish)   : {counts['bullish']:3d}개")
-    print(f"  🟡 횡보장   (Sideways)  : {counts['sideways']:3d}개")
-    print(f"  🔴 하락장   (Bearish)   : {counts['bearish']:3d}개")
-    print(f"  🔵 반등 중  (Recovering): {counts['recovering']:3d}개")
+    print(f"✅ 완료: {len(results)}개  ❌ 실패: {len(failures)}개  (3Y 기준)")
+    for k, label in [("bullish","강세"),("sideways","횡보"),
+                     ("bearish","하락"),("recovering","반등")]:
+        print(f"  {label}: {counts[k]:3d}개")
 
     out = {
-        "generated_at": datetime.now().strftime("%Y-%m-%d %H:%M"),
+        "generated_at":    datetime.now().strftime("%Y-%m-%d %H:%M"),
         "classify_method": "linear_regression_slope_r2",
-        "stocks": results,
+        "periods":         {k: v["label"] for k, v in PERIODS.items()},
+        "stocks":          results,
     }
     with open("stock_data.json", "w", encoding="utf-8") as f:
         json.dump(out, f, ensure_ascii=False, indent=2)
