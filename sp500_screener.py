@@ -25,12 +25,27 @@ sp500_screener.py  ─  S&P 500 편입/편출 추정 스크리너
 """
 
 import json
+import io
 import time
 from datetime import datetime, timedelta
 from pathlib import Path
 
+import requests
 import pandas as pd
 import yfinance as yf
+
+_HEADERS = {
+    "User-Agent": (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) "
+        "Chrome/124.0.0.0 Safari/537.36"
+    )
+}
+
+def _read_wiki_table(url: str) -> list:
+    resp = requests.get(url, headers=_HEADERS, timeout=30)
+    resp.raise_for_status()
+    return pd.read_html(io.StringIO(resp.text))
 
 # ── 상수 ─────────────────────────────────────────────────────────────
 CAP_GREEN     = 20_500_000_000   # 편입 Green zone 시총 기준
@@ -55,14 +70,14 @@ BATCH_SIZE    = 30               # 시총 1차 필터 배치 크기
 def _load_sp500() -> set[str]:
     """Wikipedia에서 S&P 500 현재 구성 종목 티커 집합 반환"""
     url = "https://en.wikipedia.org/wiki/List_of_S%26P_500_companies"
-    df  = pd.read_html(url)[0]
+    df  = _read_wiki_table(url)[0]
     return set(df["Symbol"].str.replace(r"\.", "-", regex=True).tolist())
 
 
 def _load_sp400() -> list[tuple]:
     """Wikipedia에서 S&P 400 Mid-cap 종목 반환 (편입 후보 풀)"""
     url = "https://en.wikipedia.org/wiki/List_of_S%26P_400_companies"
-    df  = pd.read_html(url)[0]
+    df  = _read_wiki_table(url)[0]
     df.columns = df.columns.str.strip()
 
     # 컬럼명이 버전마다 다를 수 있으므로 유연하게 처리

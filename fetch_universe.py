@@ -19,8 +19,25 @@ import re
 from datetime import datetime, timedelta
 from pathlib import Path
 
+import io
+import requests
 import pandas as pd
 import yfinance as yf
+
+# Wikipedia 요청용 헤더 (urllib 기본값은 403 차단됨)
+_HEADERS = {
+    "User-Agent": (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) "
+        "Chrome/124.0.0.0 Safari/537.36"
+    )
+}
+
+def _read_wiki_table(url: str) -> list:
+    """requests로 Wikipedia HTML 가져온 뒤 pd.read_html 파싱"""
+    resp = requests.get(url, headers=_HEADERS, timeout=30)
+    resp.raise_for_status()
+    return pd.read_html(io.StringIO(resp.text))
 
 CACHE_FILE = Path("universe_cache.json")
 CACHE_TTL_DAYS = 7          # 캐시 유효기간 (일)
@@ -35,7 +52,7 @@ def _fetch_sp500_from_wikipedia() -> pd.DataFrame:
     반환 컬럼: ticker, name, sector
     """
     url = "https://en.wikipedia.org/wiki/List_of_S%26P_500_companies"
-    tables = pd.read_html(url)
+    tables = _read_wiki_table(url)
     df = tables[0][["Symbol", "Security", "GICS Sector"]].copy()
     df.columns = ["ticker", "name", "sector"]
 
